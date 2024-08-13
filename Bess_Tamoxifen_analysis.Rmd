@@ -1,0 +1,424 @@
+---
+title: "Bess Tamoxifen Analysis"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(ggpubr)
+library(RColorBrewer)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+library(readxl)
+library(Hmisc)
+
+options(scipen=999)
+
+setwd("C:/Users/juli.avelar-barragan/Desktop/Project_bioinformatics/Bess_lab_tamoxifen/")
+
+OTU_table = read.delim("combined_bracken_species.txt", check.names = F, row.names = 1) %>%
+  select(contains("num")) %>%
+  rename_with(~gsub("_species.bracken_num", "", .x)) %>%
+  filter(rowSums(.) != 0)
+OTU_table = OTU_table[!rownames(OTU_table) == "Homo sapiens",]
+
+Readcounts = read.csv("Readinfo.csv", check.names = F)
+```
+
+# Project information:  
+A pharmacokinetic study performed by Dr. Elizabeth Bess in mice highlighted the gut microbiome's role in tamoxifen bioactivation. Enzyme lysates from the fecal samples of nine individuals were analyzed for their ability to hydrolyze glucuronidated tamoxifen metabolites, revealing high variability in hydrolyzing nitrogen-linked glucuronides and less variability with oxygen-linked glucuronides. The nine fecal samples were sequenced using whole genome shotgun sequencing (WGS) to characterize microbial β-glucuronidase (GUS) genes, as their substrate specificity may explain the inter-individual differences in enzyme activity.  
+
+# Read count information per sample:  
+Raw - # of reads from the sequencer.  
+QC - # of reads after the removal of PhiX, adapter, and low quality reads.  
+Host removed - # of reads after removing reads which map to the human genome.  
+```{r echo=FALSE}
+rc_df = 
+  Readcounts %>%
+  mutate(`Reads removed by QC` = Raw - QC,
+         `% removed by QC` = round((Raw - QC)/Raw*100, digits = 1),
+         `Reads removed from host` = QC - Host_removed,
+         `% removed from host` = round((QC - Host_removed)/QC*100, digits = 3)) 
+
+rc_df %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Table of averages.  
+```{r echo=FALSE}
+rc_df %>%
+  pivot_longer(!SampleID) %>%
+  group_by(name) %>%
+  summarise(Mean = round(mean(value)),
+            `Std. dev.` = round(sd (value))) %>%
+  arrange(desc(Mean)) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+# Percentage of reads classified with Kraken2:  
+```{r echo=FALSE}
+#Data pulled from Kraken2 output logs on the HPC.
+unknown_df = data.frame(
+  "SampleID" = c("14", "17", "19", "20", "2126", "22a", "22b", "25", "2621", "27", "Stan"),
+  "Classified" = c(24671608, 21667846, 21449550, 34139213, 8772618, 8491075, 20487188, 14859100, 14811562, 12939547, 10149406),
+  "Unclassified" = c(32210414, 62875189, 23696489, 43507132, 12323363, 12527792, 31296255, 26457997, 29812345, 23602613, 14855679))
+
+unknown_df = unknown_df %>%
+  mutate(
+    Total = Classified + Unclassified,
+    `% classified` = round(Classified/Total*100, digits = 1),
+    `% unclassified` = round(Unclassified/Total*100, digits = 1)
+  )
+  
+unknown_df %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r echo=FALSE, warning=FALSE}
+unknown_plot_df = unknown_df %>%
+  pivot_longer(!SampleID) %>%
+  filter(name %in% c("% unclassified", "% classified"))
+
+ggplot(data = unknown_plot_df) +
+  aes(x = name, y = value, label = SampleID) +
+  geom_boxplot(outlier.shape = "none", color = "lightblue", size = 1) +
+  geom_text_repel() +
+  theme_bw() +
+  labs(y = "Percentage", x = NULL)
+```
+
+
+# Alpha diversity:  
+Performed at the species level.  
+```{r echo=FALSE}
+alpha_df = as.data.frame(diversity(x = OTU_table, MARGIN = 2)) %>%
+  rename(Shannon = `diversity(x = OTU_table, MARGIN = 2)`) %>%
+  rownames_to_column(var = "SampleID") %>%
+  mutate(Richness = specnumber(OTU_table, MARGIN = 2)) 
+
+alpha_df %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+# Beta diversity
+Non-metric multidemensional scaling (NMDS) plot using species taxonomy and the Bray-Curtis metric.  
+
+```{r include=FALSE}
+nmds = metaMDS(t(OTU_table), trymax = 1024, parallel = 8, k = 2)
+nmds_points = as.data.frame(nmds$points) %>%
+  rownames_to_column(var = "SampleID")
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(data = nmds_points) +
+  aes(x = MDS1, y = MDS2) +
+  geom_text(aes(label = SampleID), color = "black", size = 5, alpha = 0.7) +
+  theme_bw() +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(nmds$stress, digits = 2))), hjust = 1, vjust = 1)
+```
+
+Stacked bar plot showing the taxonomic composition.  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Define a vector of taxonomy levels
+taxonomy_levels <- c("phylum", "class", "order", "family", "genus", "species")
+plots_list <- list()
+
+# Loop through each taxonomy level
+for (level in taxonomy_levels) {
+  
+  # Construct the file name based on the current taxonomy level
+  file_name <- paste0("combined_bracken_", level, ".txt")
+  
+  # Read data from the current file
+  bp_OTU_table <- read.delim(file_name, check.names = FALSE, row.names = 1) %>%
+    select(contains("num")) %>%
+    rename_with(~gsub(paste0("_", level, ".bracken_num"), "", .x)) %>%
+    filter(rowSums(.) != 0)
+  
+  # Continue with your existing data processing steps
+  bp_OTU_table <- decostand(bp_OTU_table, MARGIN = 2, method = "total") %>%
+    rownames_to_column(var = "Taxonomy")
+  
+  top_10 <- bp_OTU_table %>%
+    rowwise(Taxonomy) %>% 
+    summarise(mean = mean(c_across(everything()))) %>% 
+    ungroup %>% 
+    slice_max(mean, n = 10)
+  
+  barplot_df <- bp_OTU_table %>% 
+    pivot_longer(!Taxonomy) %>%
+    mutate(Taxonomy = if_else(Taxonomy %in% top_10$Taxonomy, Taxonomy, "Other")) %>%
+    group_by(Taxonomy, name) %>%
+    summarise(value = sum(value))
+  
+  barplot_df <- rbind(barplot_df[!(barplot_df$Taxonomy == "Other"),],barplot_df[(barplot_df$Taxonomy == "Other"),]) #Move other to bottom
+  barplot_df$Taxonomy <- factor(barplot_df$Taxonomy, levels = unique(barplot_df$Taxonomy)) #Fix the order
+  
+  Julio_color <- c("#003f5c", "#665191", "#d45087", "#ff7c43","#ffa600", "#7F0A57", "#CD9ABB", "#39A9AB", "#71CFC5", "#007947" ,"gray")
+  
+  bp_plot = ggplot(data = barplot_df) +
+    aes(x = name, weight = value, fill = Taxonomy) +
+    geom_bar() +
+    theme_classic() +
+    labs(x = NULL, y = "Relative abundance", fill = tools::toTitleCase(level)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    scale_fill_manual(values = Julio_color)
+  
+  plots_list[[paste0("plot_", level)]] <- bp_plot
+}
+
+plots_list
+```
+
+# GUS gene profiling
+
+Methods:  
+* Protein FASTA files from the supplement of https://doi.org/10.1016%2Fj.str.2017.05.003 were downloaded and DIAMOND was used to align sample reads to GUS genes at a minimum of 90% identity.  
+* If multiple reads mapped to multiple GUS genes, the read count was divided by the total number of features. For example, if one read mapped to three GUS genes identically, the total read count for each GUS gene would increase by +1/3.  
+* GUS gene counts were normalized to the number of reads per sample in reads per million (RPM).  
+```{r echo=FALSE}
+HMGC279 = read.delim("HMGC279_RPM_counts.txt", check.names = F, row.names = 1) %>%
+  rename(`SRS020328.271517-mL2` = `SRS020328.271517-mL2Parabacteroides`,
+         `SRS024132.332613-mL2` = `SRS024132.332613-mL2Bacteroides`)
+
+HMGI3013 = read.delim("HMGI3013_RPM_counts.txt", check.names = F, row.names = 1)
+
+GUS_summary = as.data.frame(rowSums(HMGC279)) %>%
+  rename(`Normalized Read Counts (HMGC279)` = `rowSums(HMGC279)`) %>%
+  mutate(`Richness (HMGC279)` = specnumber(HMGC279),
+         `Normalized Read Counts (HMGI3013)` = rowSums(HMGI3013),
+         `Richness (HMGI3013)` = specnumber(HMGI3013)) %>%
+  rownames_to_column(var = "SampleID")
+
+GUS_summary %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r warning=FALSE, include=FALSE}
+HMGC279_Sequences <- read.delim("HMGC279_Sequences.txt", header=FALSE) %>%
+  filter(str_detect(V1, ">")) %>%
+  mutate(cleaned_column = str_extract(V1, "(?<=\\s).*"),
+         sample_id = str_extract(V1, "^[^\\s]+") %>% str_remove("^>"))
+
+HMGC279_species = HMGC279 %>%
+  rownames_to_column("sample") %>%
+  pivot_longer(cols = -sample, names_to = "feature", values_to = "abundance") %>%
+  left_join(HMGC279_Sequences, by = join_by("feature" == "sample_id")) %>%
+  group_by(sample, cleaned_column) %>%
+  summarise(abundance = sum(abundance))
+
+GUS_species_df = pivot_wider(data = HMGC279_species, id_cols = sample, names_from = cleaned_column, values_from = abundance) %>%
+  column_to_rownames(var = "sample")
+
+GUS_species_nmds = metaMDS(GUS_species_df)
+species_nmds_vectors = envfit(GUS_species_nmds, GUS_species_df)
+
+# Extract feature vectors and filter for significance
+feature_coords = as.data.frame(scores(species_nmds_vectors, "vectors")) * ordiArrowMul(species_nmds_vectors)
+feature_coords$pvals = species_nmds_vectors$vectors$pvals
+feature_coords = filter(feature_coords, pvals < 0.05)
+
+ggplot() +
+  geom_segment(data = feature_coords, 
+               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "red", alpha = 0.2) +
+  geom_text_repel(data = feature_coords, 
+            aes(x = NMDS1, y = NMDS2, label = rownames(feature_coords)),
+            hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
+  geom_text(data = GUS_species_nmds$points, aes(x = MDS1, y = MDS2, label = rownames(GUS_species_nmds$points))) +
+  theme_bw() +
+  labs(title = "HMGC279 Sum Data", x = "MDS1", y = "MDS2") +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS_species_nmds$stress, digits = 2))), hjust = 1, vjust = 1)
+```
+For the figure above, GUS gene abundances were summed together if they belonged to the same taxonomy.  
+
+```{r echo=FALSE, warning=FALSE}
+GUS279_MDS = metaMDS(HMGC279)
+HMGC279_vectors = envfit(GUS279_MDS, HMGC279)
+
+# Extract feature vectors and filter for significance
+feature_coords = as.data.frame(scores(HMGC279_vectors, "vectors")) * ordiArrowMul(HMGC279_vectors)
+feature_coords$pvals = HMGC279_vectors$vectors$pvals
+feature_coords = filter(feature_coords, pvals < 0.05) %>%
+  rownames_to_column(var = "sample_id") %>%
+  left_join(HMGC279_Sequences)
+
+ggplot() +
+  geom_segment(data = feature_coords, 
+               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "red", alpha = 0.2) +
+  geom_text_repel(data = feature_coords, 
+            aes(x = NMDS1, y = NMDS2, label = cleaned_column),
+            hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
+  geom_text(data = GUS279_MDS$points, aes(x = MDS1, y = MDS2, label = rownames(GUS279_MDS$points))) +
+  theme_bw() +
+  labs(title = "HMGC279", x = "MDS1", y = "MDS2") +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS279_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
+```
+For the figure above, GUS gene abundances were analyzed separately, even if they belonged to the same taxon.  
+
+```{r echo=FALSE, warning=FALSE}
+GUS3013_sequences = read_excel("C:/Users/juli.avelar-barragan/Desktop/Project_bioinformatics/Bess_lab_tamoxifen/HMGI3013_Characteristics.xlsx", 
+    sheet = "HMGI_gus_seqs_coALign_LP1LP2")
+
+GUS3013_MDS = metaMDS(HMGI3013)
+HMGI3013_vectors = envfit(GUS3013_MDS, HMGI3013)
+
+# Extract feature vectors and filter for significance
+feature_coords = as.data.frame(scores(HMGI3013_vectors, "vectors")) * ordiArrowMul(HMGI3013_vectors)
+feature_coords$pvals = HMGI3013_vectors$vectors$pvals
+feature_coords = filter(feature_coords, pvals < 0.05) %>%
+  rownames_to_column(var = "id") %>%
+  left_join(GUS3013_sequences) %>%
+  filter(complete.cases(.))
+
+ggplot() +
+  geom_segment(data = feature_coords, 
+               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "red", alpha = 0.2) +
+  geom_text_repel(data = feature_coords, 
+            aes(x = NMDS1, y = NMDS2, label = `95% Identity Condensation`),
+            hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
+  geom_text(data = GUS3013_MDS$points, aes(x = MDS1, y = MDS2, label = rownames(GUS3013_MDS$points))) +
+  theme_bw() +
+  labs(title = "HMGI3013", x = "MDS1", y = "MDS2") +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS3013_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
+```
+Only vectors with taxonomy shown. There were many vectors without taxonomy.  
+
+
+```{r include=FALSE}
+GUS_species_df2 = GUS_species_df %>%
+  rownames_to_column(var = "Sample")
+
+# Step 1: Create a function to identify the top 10 species per sample and create a long-format data frame
+top_10_species_per_sample <- function(sample_data) {
+  top_species <- sample_data %>%
+    select(-Sample) %>%
+    pivot_longer(cols = everything(), names_to = "Species", values_to = "Count") %>%
+    arrange(desc(Count)) %>%
+    slice(1:10)
+  
+  other_species <- sample_data %>%
+    select(-Sample) %>%
+    pivot_longer(cols = everything(), names_to = "Species", values_to = "Count") %>%
+    filter(!Species %in% top_species$Species) %>%
+    summarise(Species = "Other", Count = sum(Count))
+  
+  bind_rows(top_species, other_species) %>%
+    mutate(Sample = sample_data$Sample)
+}
+
+# Step 2: Apply the function to each sample and combine the results
+df_long <- GUS_species_df2 %>%
+  group_by(Sample) %>%
+  group_split() %>%
+  map_dfr(top_10_species_per_sample)
+
+# Step 3: Create the stacked barplots
+plots <- df_long %>%
+  mutate(Species = factor(Species, levels = c(setdiff(unique(Species), "Other"), "Other"))) %>%
+  split(.$Sample) %>%
+  map(~ ggplot(.x, aes(x = "", y = Count, fill = Species)) +
+        geom_bar(stat = "identity", color = "black") +
+        theme_bw() +
+        theme(axis.ticks.x = element_blank()) +
+        ylim(0, 550) +
+        scale_fill_manual(values = Julio_color) +
+        labs(x = NULL, y = "Count (RPM)", fill = "Taxonomy", title = unique(.x$Sample)))
+
+# To display all plots (one per sample)
+plots
+```
+
+# Correlations
+No normalization was performed on the protein assay values. The three readings were averaged together. Samples 21 and 26 are missing due to not being able to assign the proper protein assay values to them.   
+```{r}
+protein_assay_data = read.csv("Glucorunide_incubation_GUS.csv") %>%
+  filter(complete.cases(.)) %>%
+  pivot_longer(!c("SampleID", "Condition")) %>%
+  group_by(SampleID, Condition) %>%
+  summarise(Value = mean(value)) %>%
+  pivot_wider(id_cols = SampleID, names_from = Condition, values_from = Value)
+
+create_heatmap <- function(GUS_df, protein_df) {
+  # Prepare the data by merging and converting to the appropriate format
+  tmp <- GUS_df %>%
+    rownames_to_column(var = "SampleID") %>%
+    inner_join(protein_df) %>%
+    column_to_rownames("SampleID")
+  
+  # Calculate Spearman correlation
+  tmp2 <- rcorr(as.matrix(tmp), type = "spearman")
+  
+  # Extract and transform the correlation coefficients
+  tmp3 <- as.data.frame(tmp2$r) %>%
+    select(`(E)-4-hydroxy tamoxifen O-b-D-glucuronide`, `N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)`) %>%
+    filter(!row.names(.) %in% c("(E)-4-hydroxy tamoxifen O-b-D-glucuronide", "N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)")) %>%
+    rownames_to_column(var = "Taxonomy") %>%
+    pivot_longer(!Taxonomy, values_to = "Rho")
+  
+  # Extract and transform the p-values
+  tmp4 <- as.data.frame(tmp2$P) %>%
+    select(`(E)-4-hydroxy tamoxifen O-b-D-glucuronide`, `N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)`) %>%
+    filter(!row.names(.) %in% c("(E)-4-hydroxy tamoxifen O-b-D-glucuronide", "N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)")) %>%
+    rownames_to_column(var = "Taxonomy") %>%
+    pivot_longer(!Taxonomy, values_to = "Pval") %>%
+    left_join(tmp3, by = c("Taxonomy", "name")) %>%
+    mutate(padj = p.adjust(.$Pval, method = "BH")) %>%
+    filter(complete.cases(.))
+  
+  # Prepare the data for heatmap
+  heatmap_df <- pivot_wider(data = tmp4, id_cols = Taxonomy, names_from = name, values_from = Rho) %>%
+    column_to_rownames(var = "Taxonomy")
+  
+  # Perform hierarchical clustering
+  clust_order1 <- hclust(dist(heatmap_df, method = "euclidean"))
+  tmp4$Taxonomy <- factor(tmp4$Taxonomy, levels = rownames(heatmap_df)[clust_order1$order])
+  
+  # Generate the heatmap
+  ggplot(data = tmp4) +
+    geom_tile(aes(x = name, y = Taxonomy, fill = Rho)) +
+    scale_fill_gradient2(mid = "#FBFEF9", low = "#0C6291", high = "#A63446", limits = c(-1, 1)) +
+    theme_classic() +
+    labs(x = NULL, y = NULL, fill = "Spearman's Rho") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+Summarized HMGC279 data first.  
+```{r}
+create_heatmap(GUS_species_df, protein_assay_data)
+```
+
+HMGC279 data now.  
+```{r}
+create_heatmap(HMGC279, protein_assay_data)
+```
+
+HMGI3013 data.  
+```{r}
+test = create_heatmap(HMGI3013, protein_assay_data)
+```
+
+TODO:
+- Tell the fxn to output the dataframe so that I can plot the individual relative abundances.
+- Have an option to output a heatmap showing only the significant correlations with the little star indicating such.
+- Plot the individual abundances of significant features.
+
+-Eventually will need to clean up and write a methods and report.  
+
+- Ask for 16S data to resolve 2126 and 2621 information.
+
+In terms of protein assay data, sample 21 is similar to 14 and 17.
+sample 26 is more similar to 19, 20, and 25
