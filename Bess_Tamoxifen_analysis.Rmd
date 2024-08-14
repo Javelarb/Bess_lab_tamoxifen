@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE)
 
 library(tidyverse)
 library(vegan)
@@ -95,7 +95,6 @@ ggplot(data = unknown_plot_df) +
   labs(y = "Percentage", x = NULL)
 ```
 
-
 # Alpha diversity:  
 Performed at the species level.  
 ```{r echo=FALSE}
@@ -111,7 +110,6 @@ alpha_df %>%
 
 # Beta diversity
 Non-metric multidemensional scaling (NMDS) plot using species taxonomy and the Bray-Curtis metric.  
-
 ```{r include=FALSE}
 nmds = metaMDS(t(OTU_table), trymax = 1024, parallel = 8, k = 2)
 nmds_points = as.data.frame(nmds$points) %>%
@@ -227,7 +225,12 @@ species_nmds_vectors = envfit(GUS_species_nmds, GUS_species_df)
 feature_coords = as.data.frame(scores(species_nmds_vectors, "vectors")) * ordiArrowMul(species_nmds_vectors)
 feature_coords$pvals = species_nmds_vectors$vectors$pvals
 feature_coords = filter(feature_coords, pvals < 0.05)
+```
 
+Ordination plot of GUS gene abundances.  
+First is the summarized version of the HMGC279 data, which combines all abundances from the same species.  
+
+```{r echo=FALSE}
 ggplot() +
   geom_segment(data = feature_coords, 
                aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
@@ -237,12 +240,12 @@ ggplot() +
             hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
   geom_text(data = GUS_species_nmds$points, aes(x = MDS1, y = MDS2, label = rownames(GUS_species_nmds$points))) +
   theme_bw() +
-  labs(title = "HMGC279 Sum Data", x = "MDS1", y = "MDS2") +
+  labs(title = "HMGC279 Summary Data", x = "MDS1", y = "MDS2") +
   annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS_species_nmds$stress, digits = 2))), hjust = 1, vjust = 1)
 ```
-For the figure above, GUS gene abundances were summed together if they belonged to the same taxonomy.  
 
-```{r echo=FALSE, warning=FALSE}
+Next is the normal HMGC279 data.  
+```{r warning=FALSE, include=FALSE}
 GUS279_MDS = metaMDS(HMGC279)
 HMGC279_vectors = envfit(GUS279_MDS, HMGC279)
 
@@ -252,7 +255,9 @@ feature_coords$pvals = HMGC279_vectors$vectors$pvals
 feature_coords = filter(feature_coords, pvals < 0.05) %>%
   rownames_to_column(var = "sample_id") %>%
   left_join(HMGC279_Sequences)
+```
 
+```{r echo=FALSE}
 ggplot() +
   geom_segment(data = feature_coords, 
                aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
@@ -265,9 +270,8 @@ ggplot() +
   labs(title = "HMGC279", x = "MDS1", y = "MDS2") +
   annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS279_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
 ```
-For the figure above, GUS gene abundances were analyzed separately, even if they belonged to the same taxon.  
 
-```{r echo=FALSE, warning=FALSE}
+```{r warning=FALSE, include=FALSE}
 GUS3013_sequences = read_excel("C:/Users/juli.avelar-barragan/Desktop/Project_bioinformatics/Bess_lab_tamoxifen/HMGI3013_Characteristics.xlsx", 
     sheet = "HMGI_gus_seqs_coALign_LP1LP2")
 
@@ -281,7 +285,11 @@ feature_coords = filter(feature_coords, pvals < 0.05) %>%
   rownames_to_column(var = "id") %>%
   left_join(GUS3013_sequences) %>%
   filter(complete.cases(.))
+```
 
+Lastly is the HMGI3013 data.  
+Only significant vectors with taxonomy shown. There were many vectors without taxonomy.  
+```{r echo=FALSE}
 ggplot() +
   geom_segment(data = feature_coords, 
                aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
@@ -294,10 +302,9 @@ ggplot() +
   labs(title = "HMGI3013", x = "MDS1", y = "MDS2") +
   annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS3013_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
 ```
-Only vectors with taxonomy shown. There were many vectors without taxonomy.  
 
-
-```{r include=FALSE}
+Plots showing the top 10 most abundant GUS gene from the summarized HMGC279 data set.   
+```{r echo=FALSE}
 GUS_species_df2 = GUS_species_df %>%
   rownames_to_column(var = "Sample")
 
@@ -342,8 +349,8 @@ plots
 ```
 
 # Correlations
-No normalization was performed on the protein assay values. The three readings were averaged together. Samples 21 and 26 are missing due to not being able to assign the proper protein assay values to them.   
-```{r}
+No normalization was performed on the protein assay values (Based on standards). The three readings were averaged together. Samples 21 and 26 are missing due to not being able to assign the proper protein assay values to them.   
+```{r include=FALSE}
 protein_assay_data = read.csv("Glucorunide_incubation_GUS.csv") %>%
   filter(complete.cases(.)) %>%
   pivot_longer(!c("SampleID", "Condition")) %>%
@@ -387,38 +394,119 @@ create_heatmap <- function(GUS_df, protein_df) {
   tmp4$Taxonomy <- factor(tmp4$Taxonomy, levels = rownames(heatmap_df)[clust_order1$order])
   
   # Generate the heatmap
-  ggplot(data = tmp4) +
+  plot = ggplot(data = tmp4) +
     geom_tile(aes(x = name, y = Taxonomy, fill = Rho)) +
     scale_fill_gradient2(mid = "#FBFEF9", low = "#0C6291", high = "#A63446", limits = c(-1, 1)) +
     theme_classic() +
     labs(x = NULL, y = NULL, fill = "Spearman's Rho") +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+  
+  return(plot)
+}
+
+create_correlation_plots <- function(sig_sum_feat1, sig_sum_feat2) {
+  
+  # Ensure name and Taxonomy are valid column names
+  sig_sum_feat1 <- sig_sum_feat1 %>%
+    mutate(name_clean = make.names(name),
+           taxonomy_clean = make.names(Taxonomy))
+  
+  # Add the cleaned columns to sig_sum_feat2
+  sig_sum_feat2 <- sig_sum_feat2 %>%
+    rename_with(~make.names(.), everything())
+  
+  purrr::map2(sig_sum_feat1$name_clean, 
+              sig_sum_feat1$taxonomy_clean, 
+              ~{
+                ggplot(data = sig_sum_feat2) +
+                  aes(x = .data[[.x]], y = .data[[.y]]) +
+                  geom_smooth(method = lm, color = "black") +
+                  geom_text(aes(label = rownames(sig_sum_feat2)), alpha = 0.75) +
+                  theme_bw() +
+                  labs(x = sig_sum_feat1$name[which(sig_sum_feat1$name_clean == .x)],
+                       y = sig_sum_feat1$Taxonomy[which(sig_sum_feat1$taxonomy_clean == .y)]) +
+                  annotate("text", -Inf, Inf, 
+                           label = bquote("Spearman's \U03C1 ="~.(round(sig_sum_feat1$Rho[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 2))), 
+                           hjust = 0, vjust = 1) +
+                  annotate("text", -Inf, Inf, 
+                           label = bquote("p ="~.(round(sig_sum_feat1$Pval[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 4))), 
+                           hjust = 0, vjust = 2) +
+                  annotate("text", -Inf, Inf, 
+                           label = bquote("p (adj) ="~.(round(sig_sum_feat1$padj[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 3))), 
+                           hjust = 0, vjust = 3)
+              })
 }
 ```
 
 Summarized HMGC279 data first.  
-```{r}
-create_heatmap(GUS_species_df, protein_assay_data)
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+summary_HMGC279_hm = create_heatmap(GUS_species_df, protein_assay_data)
+summary_HMGC279_hm
 ```
 
-HMGC279 data now.  
-```{r}
-create_heatmap(HMGC279, protein_assay_data)
+The individual features. Y-axis is in reads per million of GUS gene abundances.  
+This is showing the features that had a p-value < 0.05 (non-adjusted) and a correaltion coefficient > 0.5.  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sig_sumHMHC279_feat1 = summary_HMGC279_hm$data %>%
+  filter(Pval < 0.05 & abs(Rho) > 0.5)
+
+sig_sumHMHC279_feat2 = GUS_species_df %>%
+    rownames_to_column(var = "SampleID") %>%
+    inner_join(protein_assay_data) %>%
+    column_to_rownames("SampleID")
+
+correlation_plots <- create_correlation_plots(sig_sumHMHC279_feat1, sig_sumHMHC279_feat2)
+correlation_plots
+```
+
+Unsummarized HMGC279 data now.  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+HMGC279_hm = create_heatmap(HMGC279, protein_assay_data)
+HMGC279_hm
+```
+
+The individual features.  
+There was one significant feature after BH correction of p-values.  
+SRS023176.66822-NC = Mediterraneibacter gnavus.  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sig_HMHC279_feat1 = HMGC279_hm$data %>%
+  filter(padj < 0.05 & abs(Rho) > 0.5)
+
+sig_HMHC279_feat2 = HMGC279 %>%
+    rownames_to_column(var = "SampleID") %>%
+    inner_join(protein_assay_data) %>%
+    column_to_rownames("SampleID")
+
+correlation_plots2 <- create_correlation_plots(sig_HMHC279_feat1, sig_HMHC279_feat2)
+correlation_plots2
 ```
 
 HMGI3013 data.  
-```{r}
-test = create_heatmap(HMGI3013, protein_assay_data)
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+HMGI3013_hm = create_heatmap(HMGI3013, protein_assay_data)
+HMGI3013_hm
 ```
 
-TODO:
-- Tell the fxn to output the dataframe so that I can plot the individual relative abundances.
-- Have an option to output a heatmap showing only the significant correlations with the little star indicating such.
-- Plot the individual abundances of significant features.
+There were two significant features after BH correction of p-values.  
+SRS024549.1421-T1-C = B. fragilis.  
+SRS024388.120461-T1-C = B. fragilis also.  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sig_HMGI3013_feat1 = HMGI3013_hm$data %>%
+  filter(padj < 0.05 & abs(Rho) > 0.5)
 
--Eventually will need to clean up and write a methods and report.  
+sig_HMGI3013_feat2 = HMGI3013 %>%
+    rownames_to_column(var = "SampleID") %>%
+    inner_join(protein_assay_data) %>%
+    column_to_rownames("SampleID")
 
-- Ask for 16S data to resolve 2126 and 2621 information.
+correlation_plots3 <- create_correlation_plots(sig_HMGI3013_feat1, sig_HMGI3013_feat2)
+correlation_plots3
+```
 
-In terms of protein assay data, sample 21 is similar to 14 and 17.
-sample 26 is more similar to 19, 20, and 25
+TODO:  
+- Make the HMP IDs into the actual names on the individual plots.  
+- Ask for 16S data to resolve 2126 and 2621 information?  
+
+Notes:  
+In terms of protein assay data, sample 21 is similar to 14 and 17.  
+sample 26 is more similar to 19, 20, and 25.  
