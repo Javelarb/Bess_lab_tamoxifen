@@ -244,10 +244,10 @@ ggplot() +
   annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS_species_nmds$stress, digits = 2))), hjust = 1, vjust = 1)
 ```
 
-Next is the normal HMGC279 data.  
 ```{r warning=FALSE, include=FALSE}
-GUS279_MDS = metaMDS(HMGC279)
-HMGC279_vectors = envfit(GUS279_MDS, HMGC279)
+GUS279_MDS = metaMDS(filter(HMGC279, !row.names(HMGC279) %in% c("2126", "22b", "2621", "Stan")))
+HMGC279_vectors = envfit(GUS279_MDS, filter(HMGC279, !row.names(HMGC279) %in% c("2126", "22b", "2621", "Stan")))
+
 
 # Extract feature vectors and filter for significance
 feature_coords = as.data.frame(scores(HMGC279_vectors, "vectors")) * ordiArrowMul(HMGC279_vectors)
@@ -257,50 +257,20 @@ feature_coords = filter(feature_coords, pvals < 0.05) %>%
   left_join(HMGC279_Sequences)
 ```
 
-```{r echo=FALSE}
-ggplot() +
-  geom_segment(data = feature_coords, 
-               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
-               arrow = arrow(length = unit(0.2, "cm")), color = "red", alpha = 0.2) +
-  geom_text_repel(data = feature_coords, 
-            aes(x = NMDS1, y = NMDS2, label = cleaned_column),
-            hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
-  geom_text(data = GUS279_MDS$points, aes(x = MDS1, y = MDS2, label = rownames(GUS279_MDS$points))) +
-  theme_bw() +
-  labs(title = "HMGC279", x = "MDS1", y = "MDS2") +
-  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS279_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
-```
-
 ```{r warning=FALSE, include=FALSE}
 GUS3013_sequences = read_excel("C:/Users/juli.avelar-barragan/Desktop/Project_bioinformatics/Bess_lab_tamoxifen/HMGI3013_Characteristics.xlsx", 
     sheet = "HMGI_gus_seqs_coALign_LP1LP2")
 
-GUS3013_MDS = metaMDS(HMGI3013)
-HMGI3013_vectors = envfit(GUS3013_MDS, HMGI3013)
+GUS3013_MDS = metaMDS(filter(HMGI3013, !row.names(HMGI3013) %in% c("2126", "22b", "2621", "Stan")))
+HMGI3013_vectors = envfit(GUS3013_MDS, filter(HMGI3013, !row.names(HMGI3013) %in% c("2126", "22b", "2621", "Stan")))
 
 # Extract feature vectors and filter for significance
-feature_coords = as.data.frame(scores(HMGI3013_vectors, "vectors")) * ordiArrowMul(HMGI3013_vectors)
-feature_coords$pvals = HMGI3013_vectors$vectors$pvals
-feature_coords = filter(feature_coords, pvals < 0.05) %>%
+feature_coords2 = as.data.frame(scores(HMGI3013_vectors, "vectors")) * ordiArrowMul(HMGI3013_vectors)
+feature_coords2$pvals = HMGI3013_vectors$vectors$pvals
+feature_coords2 = filter(feature_coords2, pvals < 0.05) %>%
   rownames_to_column(var = "id") %>%
   left_join(GUS3013_sequences) %>%
   filter(complete.cases(.))
-```
-
-Lastly is the HMGI3013 data.  
-Only significant vectors with taxonomy shown. There were many vectors without taxonomy.  
-```{r echo=FALSE}
-ggplot() +
-  geom_segment(data = feature_coords, 
-               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
-               arrow = arrow(length = unit(0.2, "cm")), color = "red", alpha = 0.2) +
-  geom_text_repel(data = feature_coords, 
-            aes(x = NMDS1, y = NMDS2, label = `95% Identity Condensation`),
-            hjust = -0.2, vjust = 1,  color = "gray30", size = 3) +
-  geom_text(data = GUS3013_MDS$points, aes(x = MDS1, y = MDS2, label = rownames(GUS3013_MDS$points))) +
-  theme_bw() +
-  labs(title = "HMGI3013", x = "MDS1", y = "MDS2") +
-  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS3013_MDS$stress, digits = 2))), hjust = 1, vjust = 1)
 ```
 
 Plots showing the top 10 most abundant GUS gene from the summarized HMGC279 data set.   
@@ -351,7 +321,14 @@ plots
 # Correlations
 No normalization was performed on the protein assay values (Based on standards). The three readings were averaged together. Samples 21 and 26 are missing due to not being able to assign the proper protein assay values to them.   
 ```{r include=FALSE}
-protein_assay_data = read.csv("Glucorunide_incubation_GUS.csv") %>%
+Glucorunide_incubation_GUS = read.csv("Glucorunide_incubation_GUS.csv")
+
+plot_names = Glucorunide_incubation_GUS %>% 
+  select(SampleID, AltID) %>% 
+  distinct(SampleID, AltID) %>%
+  filter(complete.cases(.))
+
+protein_assay_data = Glucorunide_incubation_GUS %>%
   filter(complete.cases(.)) %>%
   pivot_longer(!c("SampleID", "Condition")) %>%
   group_by(SampleID, Condition) %>%
@@ -420,7 +397,7 @@ create_correlation_plots <- function(sig_sum_feat1, sig_sum_feat2) {
               ~{
                 ggplot(data = sig_sum_feat2) +
                   aes(x = .data[[.x]], y = .data[[.y]]) +
-                  geom_smooth(method = lm, color = "black") +
+                  geom_smooth(method = lm, color = "black", fill = "#A690C4") +
                   geom_text(aes(label = rownames(sig_sum_feat2)), alpha = 0.75) +
                   theme_bw() +
                   labs(x = sig_sum_feat1$name[which(sig_sum_feat1$name_clean == .x)],
@@ -428,12 +405,12 @@ create_correlation_plots <- function(sig_sum_feat1, sig_sum_feat2) {
                   annotate("text", -Inf, Inf, 
                            label = bquote("Spearman's \U03C1 ="~.(round(sig_sum_feat1$Rho[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 2))), 
                            hjust = 0, vjust = 1) +
-                  annotate("text", -Inf, Inf, 
-                           label = bquote("p ="~.(round(sig_sum_feat1$Pval[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 4))), 
-                           hjust = 0, vjust = 2) +
+                  #annotate("text", -Inf, Inf, 
+                  #         label = bquote("p ="~.(round(sig_sum_feat1$Pval[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 4))), 
+                  #         hjust = 0, vjust = 2) +
                   annotate("text", -Inf, Inf, 
                            label = bquote("p (adj) ="~.(round(sig_sum_feat1$padj[which(sig_sum_feat1$taxonomy_clean == .y)], digits = 3))), 
-                           hjust = 0, vjust = 3)
+                           hjust = 0, vjust = 2)
               })
 }
 ```
@@ -497,16 +474,117 @@ sig_HMGI3013_feat1 = HMGI3013_hm$data %>%
 sig_HMGI3013_feat2 = HMGI3013 %>%
     rownames_to_column(var = "SampleID") %>%
     inner_join(protein_assay_data) %>%
-    column_to_rownames("SampleID")
+    left_join(plot_names) %>%
+    column_to_rownames("AltID") %>%
+    select(!SampleID)
 
 correlation_plots3 <- create_correlation_plots(sig_HMGI3013_feat1, sig_HMGI3013_feat2)
-correlation_plots3
+
+panel_C = correlation_plots3[[1]] + 
+  geom_point(pch = 21, size = 6, color = "black") +
+  scale_x_continuous(labels = scales::scientific) +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(x = "END abundance (Total ion counts)", y = "Reads per million", title = expression(italic("B. fragilis")), subtitle = "SRS024388.120461-T1-C")
+panel_C
+
+panel_D = correlation_plots3[[2]] + 
+  geom_point(pch = 21, size = 6, color = "black") +
+  scale_x_continuous(labels = scales::scientific) +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(x = "END abundance (Total ion counts)", y = "Reads per million", title = expression(italic("B. fragilis")), subtitle = "SRS024549.1421-T1-C")
+panel_D
 ```
 
-TODO:  
-- Make the HMP IDs into the actual names on the individual plots.  
-- Ask for 16S data to resolve 2126 and 2621 information?  
+HMGI3013 data.  
+Only significant vectors with taxonomy shown. There were many vectors without taxonomy.  
+```{r echo=FALSE}
+GUS3013_MDS_points = as.data.frame(GUS3013_MDS$points) %>%
+  rownames_to_column(var = "SampleID") %>% 
+  left_join(plot_names) %>%
+  left_join(protein_assay_data)
 
-Notes:  
-In terms of protein assay data, sample 21 is similar to 14 and 17.  
-sample 26 is more similar to 19, 20, and 25.  
+panel_B = ggplot() +
+  geom_segment(data = feature_coords2, 
+               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "pink", alpha = 0.2) +
+  geom_text_repel(data = feature_coords2, 
+            aes(x = NMDS1, y = NMDS2, label = `95% Identity Condensation`),
+            hjust = -0.2, vjust = 1,  color = "gray50", size = 2.5) +
+  geom_point(data = GUS3013_MDS_points, aes(x = MDS1, y = MDS2, fill = `N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)`), pch = 21, color = "black", size = 6) +
+  geom_text(data = GUS3013_MDS_points, aes(x = MDS1, y = MDS2, label = AltID)) +
+  theme_bw() +
+  labs(title = "HMGI3013", x = "MDS1", y = "MDS2", fill = "END \n(Total ion counts)") +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS3013_MDS$stress, digits = 2))), hjust = 1, vjust = 1) +
+  scale_fill_gradient(low = "white", high = "#A690C4", labels = scales::scientific)
+```
+
+HMGC279 data.  
+Only significant vectors with taxonomy shown.  
+```{r echo=FALSE}
+GUS279_MDS_points = as.data.frame(GUS279_MDS$points) %>%
+  rownames_to_column(var = "SampleID") %>% 
+  left_join(plot_names) %>%
+  left_join(protein_assay_data) %>%
+  filter(complete.cases(.))
+
+panel_E = ggplot() +
+  geom_segment(data = feature_coords, 
+               aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "pink", alpha = 0.2) +
+  geom_text_repel(data = feature_coords, 
+            aes(x = NMDS1, y = NMDS2, label = `cleaned_column`),
+            hjust = -0.2, vjust = 1,  color = "gray50", size = 2.5) +
+  geom_point(data = GUS279_MDS_points, aes(x = MDS1, y = MDS2, fill = `N-Desmethyl-4-hydroxytamoxifen b-D-glucuronide (E/Z mixture)`), pch = 21, color = "black", size = 6) +
+  geom_text(data = GUS279_MDS_points, aes(x = MDS1, y = MDS2, label = AltID)) +
+  theme_bw() +
+  labs(title = "HMGC279", x = "MDS1", y = "MDS2", fill = "END \n(Total ion counts)") +
+  annotate("text", x = Inf, y = Inf, label = bquote("Stress ="~.(round(GUS279_MDS$stress, digits = 2))), hjust = 1, vjust = 1) +
+  scale_fill_gradient(low = "white", high = "#A690C4", labels = scales::scientific)
+```
+
+Multipanel figure.  
+```{r}
+genus_GUS_df = GUS_species_df2 %>%
+  pivot_longer(!Sample) %>%
+  separate(name, into = c("genus", "species", "strain"), remove = F, sep = " ") %>%
+  group_by(Sample, genus) %>%
+  summarise(value = sum(value))
+
+top_10_gus_genus = genus_GUS_df %>% 
+  group_by(genus) %>%
+  summarise(mean = mean(value)) %>%
+  ungroup %>%
+  slice_max(mean, n = 10)
+  
+GUS_barplot_df = genus_GUS_df %>%
+  mutate(genus = if_else(genus %in% top_10_gus_genus$genus, genus, "Other")) %>%
+  group_by(Sample, genus) %>%
+  summarise(value = sum(value))
+  
+GUS_barplot_df <- rbind(GUS_barplot_df[!(GUS_barplot_df$genus == "Other"),],GUS_barplot_df[(GUS_barplot_df$genus == "Other"),])
+GUS_barplot_df$genus <- factor(GUS_barplot_df$genus, levels = unique(GUS_barplot_df$genus))
+
+GUS_barplot_df = GUS_barplot_df %>%
+  filter(!Sample %in% c("2126", "22b", "2621", "Stan")) %>%
+  left_join(plot_names, by = join_by("Sample" == "SampleID"))
+  
+panel_A = ggplot(data = GUS_barplot_df) +
+    aes(x = as.character(AltID), weight = value, fill = genus) +
+    geom_bar(color = "black") +
+    theme_classic() +
+    labs(x = NULL, y = "Normalized GUS abundance (RPM)", fill = "Taxonomy", title = "HMGC279") +
+    scale_fill_manual(values = Julio_color)
+```
+
+```{r}
+Figure_7 = ggarrange(
+  ggarrange(panel_A, panel_B, ncol = 1, labels = c("A", "B")),
+  ggarrange(panel_C, panel_D, nrow = 1, labels = c("C", "D")),
+  ncol = 1, heights = c(2,1))
+
+ggsave("Figure_7A.svg", plot = panel_A, width =  6.54, height = 3, dpi = 600, bg = "white", units = "in")
+ggsave("Figure_7B.svg", plot = panel_B, width =  6.54, height = 5, dpi = 600, bg = "white", units = "in")
+ggsave("Figure_7C.svg", plot = panel_C, width =  3.27, height = 3.27, dpi = 600, bg = "white", units = "in")
+ggsave("Figure_7D.svg", plot = panel_D, width =  3.27, height = 3.27, dpi = 600, bg = "white", units = "in")
+ggsave("Figure_7E.svg", plot = panel_E, width =  6.54, height = 5, dpi = 600, bg = "white", units = "in")
+```
